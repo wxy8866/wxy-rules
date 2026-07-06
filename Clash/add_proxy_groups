@@ -1,0 +1,28 @@
+[YAML]
++proxy-groups:
+  - name: AppleTVplus
+    icon: https://www.naiixi.com/Crypto.png
+    url: http://www.gstatic.com/generate_204
+    type: select
+    include-all-proxies: true
+    filter: "San Jose.*Premium"
+  - name: JAVDB
+    icon: https://www.naiixi.com/Crypto.png
+    url: http://www.gstatic.com/generate_204
+    type: url-test
+    include-all-proxies: true
+    filter: "San Jose.*Premium"
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+
++rules:
+  - GEOSITE,apple-tvplus,AppleTVplus
+  - DOMAIN,np-edge.itunes.apple.com,AppleTVplus
+  - DOMAIN,play-edge.itunes.apple.com,AppleTVplus
+  - DOMAIN,hls-amt.itunes.apple.com,AppleTVplus
+  - DOMAIN,hls.itunes.apple.com,AppleTVplus
+  - DOMAIN,linear.tv.apple.com,AppleTVplus
+  - DOMAIN,known-issues.apple.com,AppleTVplus
+  - DOMAIN-SUFFIX,tv.apple.com,AppleTVplus
+  - DOMAIN-KEYWORD,javdb.com,JAVDB
+  - DOMAIN-KEYWORD,jdbstatic,JAVDB

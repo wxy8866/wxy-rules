@@ -1,0 +1,788 @@
+# wxy-clash.yaml — OpenClash 多机场整合配置
+# 参考：wxy-sr-rules.conf (Shadowrocket) + Nexitally.yaml (单机场)
+# 用法：
+#   1) 把下方 proxy-providers 中三个机场的 url 占位符 <REPLACE_ME_AIRPORT_N> 换成你的订阅地址
+#   2) 如不需要三个机场，删掉多余的 provider 条目，并在 proxy-groups 中同步删除 use: 引用
+#   3) 节点按地区/标签靠正则 filter 自动归组，无需手动列节点
+#
+# 关键设计：
+#   - proxy-providers 接入 3 个机场，节点不写死
+#   - 地区分组（港/日/新/美/韩/台/英/德）用 url-test + filter 正则筛选
+#   - 服务分组（Netflix/Disney+/HBO/YouTube/Bahamut/AI/Telegram/...）沿用 Nexitally 细分风格
+#   - AI 分组默认偏好日本节点（沿用 Shadowrocket 的 AI专用节点 习惯）
+#   - 规则集统一走 rule-providers 远程订阅，自动每天更新
+
+# ========== 基础 ==========
+#  现在基本都用 mixed-port，省一个端口、客户端不用区分。port 是早期 Clash 的写法，留着是为了兼容。
+mixed-port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+unified-delay: true
+#tcp-concurrent: true
+external-controller: 0.0.0.0:9090
+#geodata-mode: true
+#geo-auto-update: true
+#geo-update-interval: 24
+#find-process-mode: strict
+#global-client-fingerprint: chrome
+
+# ========== Sniffer ==========
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "+.push.apple.com"
+    - "+.apple.com"
+    - "+.weixin.qq.com"
+    - "Mijia Cloud"
+    - "dlg.io.mi.com"
+
+# ========== DNS ==========
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/15
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - https://dns.google/dns-query
+    - https://doh.pub/dns-query
+  fallback:
+    - https://1.0.0.1/dns-query
+    - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.localhost"
+    - "*.localdomain"
+    - "*.home.arpa"
+    - "+.msftconnecttest.com"
+    - "+.msftncsi.com"
+    - "time.*.com"
+    - "time.*.gov"
+    - "time.*.apple.com"
+    - "ntp.*.com"
+    - "+.pool.ntp.org"
+    - "+.ntp.org.cn"
+    - "stun.*.*"
+    - "stun.*.*.*"
+    - "+.srv.nintendo.net"
+    - "+.stun.playstation.net"
+    - "xbox.*.microsoft.com"
+    - "+.xboxlive.com"
+    - "speedtest.cros.wr.pvp.net"
+
+# ========== 机场订阅 (proxy-providers) ==========
+proxy-providers:
+  airport_1:
+    type: http
+    url: "<REPLACE_ME_AIRPORT_1>"
+    interval: 86400
+    path: ./providers/airport_1.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    # exclude-filter 用来过滤掉机场的流量/到期信息节点
+    exclude-filter: "(?i)流量|到期|过期|官网|套餐|traffic|expire|reset"
+
+  airport_2:
+    type: http
+    url: "<REPLACE_ME_AIRPORT_2>"
+    interval: 86400
+    path: ./providers/airport_2.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    exclude-filter: "(?i)流量|到期|过期|官网|套餐|traffic|expire|reset"
+
+  airport_3:
+    type: http
+    url: "<REPLACE_ME_AIRPORT_3>"
+    interval: 86400
+    path: ./providers/airport_3.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+    exclude-filter: "(?i)流量|到期|过期|官网|套餐|traffic|expire|reset"
+
+# ========== 锚点：地区 url-test 组复用 ==========
+# 该字段不是 Clash 标准键，但 YAML 解析时会被识别为锚点，
+# 下方 proxy-groups 用 `<<: *ut` 复用 use/url/interval 等字段。
+# Mihomo/Clash.Meta 会忽略未知顶层键。
+x-ut-template: &ut
+  type: url-test
+  url: http://www.gstatic.com/generate_204
+  interval: 300
+  tolerance: 50
+  lazy: true
+  use:
+    - airport_1
+    - airport_2
+    - airport_3
+
+# ========== proxy-groups ==========
+proxy-groups:
+  # ----- 主入口 -----
+  - name: Proxies
+    type: select
+    proxies:
+      - 自动选择
+      - 香港节点
+      - 日本节点
+      - 狮城节点
+      - 美国节点
+      - 韩国节点
+      - 台湾节点
+      - 英国节点
+      - 德国节点
+      - Direct
+    use:
+      - airport_1
+      - airport_2
+      - airport_3
+
+  - name: 自动选择
+    <<: *ut
+
+  # ----- AI / 大模型 -----
+  - name: AI
+    type: select
+    proxies:
+      - 日本节点
+      - 美国节点
+      - 狮城节点
+      - 英国节点
+      - 德国节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  # ----- 流媒体 -----
+  - name: Netflix
+    type: select
+    proxies:
+      - 狮城节点
+      - 日本节点
+      - 香港节点
+      - 美国节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: Disney+
+    type: select
+    proxies:
+      - 美国节点
+      - 日本节点
+      - 狮城节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: HBO
+    type: select
+    proxies:
+      - 狮城节点
+      - 美国节点
+      - 香港节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: YouTube
+    type: select
+    proxies:
+      - 日本节点
+      - 香港节点
+      - 狮城节点
+      - 美国节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: Bahamut
+    type: select
+    proxies:
+      - 台湾节点
+      - 香港节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: Bilibili
+    type: select
+    proxies:
+      - Direct
+      - 台湾节点
+      - 香港节点
+      - Proxies
+
+  - name: MyTVSuper
+    type: select
+    proxies:
+      - 香港节点
+      - Proxies
+      - Direct
+
+  - name: Tiktok
+    type: select
+    proxies:
+      - 日本节点
+      - 狮城节点
+      - 美国节点
+      - Proxies
+      - Direct
+
+  - name: 网易音乐
+    type: select
+    proxies:
+      - Direct
+      - Proxies
+
+  # ----- 应用服务 -----
+  - name: Telegram
+    type: select
+    proxies:
+      - 狮城节点
+      - 香港节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: Microsoft
+    type: select
+    proxies:
+      - Direct
+      - Proxies
+      - 自动选择
+
+  - name: Apple
+    type: select
+    proxies:
+      - Direct
+      - Proxies
+      - 自动选择
+
+  - name: Google
+    type: select
+    proxies:
+      - Proxies
+      - 自动选择
+      - Direct
+
+  - name: Scholar
+    type: select
+    proxies:
+      - 美国节点
+      - 英国节点
+      - 自动选择
+      - Proxies
+      - Direct
+
+  - name: 谷歌FCM
+    type: select
+    proxies:
+      - Direct
+      - 自动选择
+      - Proxies
+
+  # ----- 游戏 -----
+  - name: Steam
+    type: select
+    proxies:
+      - Direct
+      - Proxies
+      - 自动选择
+
+  - name: Epic
+    type: select
+    proxies:
+      - Proxies
+      - 自动选择
+      - Direct
+
+  - name: PlayStation
+    type: select
+    proxies:
+      - Proxies
+      - Direct
+
+  - name: Xbox
+    type: select
+    proxies:
+      - Proxies
+      - Direct
+
+  - name: 游戏平台
+    type: select
+    proxies:
+      - Direct
+      - Proxies
+      - 自动选择
+
+  # ----- Crypto -----
+  - name: Crypto
+    type: select
+    proxies:
+      - 狮城节点
+      - 日本节点
+      - Proxies
+      - 自动选择
+
+  # ----- 地域分组（url-test，由 filter 正则从 provider 中筛选）-----
+  - name: 香港节点
+    <<: *ut
+    filter: "(?i)港|hk|hong\\s?kong"
+
+  - name: 日本节点
+    <<: *ut
+    filter: "(?i)日本|日|jp|japan"
+
+  - name: 狮城节点
+    <<: *ut
+    filter: "(?i)新加坡|狮城|sg|singapore"
+
+  - name: 美国节点
+    <<: *ut
+    filter: "(?i)美国|美|us|usa|united\\s?states|seattle|san\\s?jose|los\\s?angeles"
+
+  - name: 韩国节点
+    <<: *ut
+    filter: "(?i)韩国|韩|kr|korea"
+
+  - name: 台湾节点
+    <<: *ut
+    filter: "(?i)台湾|台|tw|taiwan"
+
+  - name: 英国节点
+    <<: *ut
+    filter: "(?i)英国|英|uk|united\\s?kingdom|britain"
+
+  - name: 德国节点
+    <<: *ut
+    filter: "(?i)德国|德|de|germany"
+
+  # ----- 兜底 -----
+  - name: Direct
+    type: select
+    proxies:
+      - DIRECT
+      - Proxies
+
+  - name: Final
+    type: select
+    proxies:
+      - Proxies
+      - Direct
+
+# ========== rule-providers ==========
+rule-providers:
+  # —— Loyalsoldier clash-rules（域名/IP 行为已分好）——
+  reject:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt
+    path: ./ruleset/loyalsoldier/reject.txt
+    interval: 86400
+  private:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt
+    path: ./ruleset/loyalsoldier/private.txt
+    interval: 86400
+  direct:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt
+    path: ./ruleset/loyalsoldier/direct.txt
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt
+    path: ./ruleset/loyalsoldier/proxy.txt
+    interval: 86400
+  apple:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/apple.txt
+    path: ./ruleset/loyalsoldier/apple.txt
+    interval: 86400
+  icloud:
+    type: http
+    behavior: domain
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/icloud.txt
+    path: ./ruleset/loyalsoldier/icloud.txt
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/telegramcidr.txt
+    path: ./ruleset/loyalsoldier/telegramcidr.txt
+    interval: 86400
+  cncidr:
+    type: http
+    behavior: ipcidr
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt
+    path: ./ruleset/loyalsoldier/cncidr.txt
+    interval: 86400
+  lancidr:
+    type: http
+    behavior: ipcidr
+    format: text
+    url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt
+    path: ./ruleset/loyalsoldier/lancidr.txt
+    interval: 86400
+
+  # —— ACL4SSR（服务/平台规则集）——
+  LocalAreaNetwork:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/LocalAreaNetwork.list
+    path: ./ruleset/acl4ssr/LocalAreaNetwork.list
+    interval: 86400
+  UnBan:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/UnBan.list
+    path: ./ruleset/acl4ssr/UnBan.list
+    interval: 86400
+  ChinaDomain:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/ChinaDomain.list
+    path: ./ruleset/acl4ssr/ChinaDomain.list
+    interval: 86400
+  ChinaCompanyIp:
+    type: http
+    behavior: ipcidr
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/ChinaCompanyIp.list
+    path: ./ruleset/acl4ssr/ChinaCompanyIp.list
+    interval: 86400
+  Download:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Download.list
+    path: ./ruleset/acl4ssr/Download.list
+    interval: 86400
+
+  GoogleFCM:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/GoogleFCM.list
+    path: ./ruleset/acl4ssr/GoogleFCM.list
+    interval: 86400
+  GoogleCN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/GoogleCN.list
+    path: ./ruleset/acl4ssr/GoogleCN.list
+    interval: 86400
+  SteamCN:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/SteamCN.list
+    path: ./ruleset/acl4ssr/SteamCN.list
+    interval: 86400
+  OneDrive:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/OneDrive.list
+    path: ./ruleset/acl4ssr/OneDrive.list
+    interval: 86400
+  Microsoft:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Microsoft.list
+    path: ./ruleset/acl4ssr/Microsoft.list
+    interval: 86400
+  Google:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Google.list
+    path: ./ruleset/acl4ssr/Google.list
+    interval: 86400
+
+  OpenAi:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/OpenAi.list
+    path: ./ruleset/acl4ssr/OpenAi.list
+    interval: 86400
+  AI:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/AI.list
+    path: ./ruleset/acl4ssr/AI.list
+    interval: 86400
+
+  NetEaseMusic:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/NetEaseMusic.list
+    path: ./ruleset/acl4ssr/NetEaseMusic.list
+    interval: 86400
+  YouTube:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/YouTube.list
+    path: ./ruleset/acl4ssr/YouTube.list
+    interval: 86400
+  Netflix:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Netflix.list
+    path: ./ruleset/acl4ssr/Netflix.list
+    interval: 86400
+  Disney:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Disney.list
+    path: ./ruleset/acl4ssr/Disney.list
+    interval: 86400
+  HBO:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/HBO.list
+    path: ./ruleset/acl4ssr/HBO.list
+    interval: 86400
+  Bahamut:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Bahamut.list
+    path: ./ruleset/acl4ssr/Bahamut.list
+    interval: 86400
+  BilibiliHMT:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/BilibiliHMT.list
+    path: ./ruleset/acl4ssr/BilibiliHMT.list
+    interval: 86400
+  Bilibili:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Bilibili.list
+    path: ./ruleset/acl4ssr/Bilibili.list
+    interval: 86400
+  TikTok:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/TikTok.list
+    path: ./ruleset/acl4ssr/TikTok.list
+    interval: 86400
+  ChinaMedia:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/ChinaMedia.list
+    path: ./ruleset/acl4ssr/ChinaMedia.list
+    interval: 86400
+  ProxyMedia:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/ProxyMedia.list
+    path: ./ruleset/acl4ssr/ProxyMedia.list
+    interval: 86400
+
+  Telegram:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Telegram.list
+    path: ./ruleset/acl4ssr/Telegram.list
+    interval: 86400
+
+  Epic:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Epic.list
+    path: ./ruleset/acl4ssr/Epic.list
+    interval: 86400
+  Steam:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Steam.list
+    path: ./ruleset/acl4ssr/Steam.list
+    interval: 86400
+  Origin:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Origin.list
+    path: ./ruleset/acl4ssr/Origin.list
+    interval: 86400
+  Sony:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Sony.list
+    path: ./ruleset/acl4ssr/Sony.list
+    interval: 86400
+  Nintendo:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Nintendo.list
+    path: ./ruleset/acl4ssr/Nintendo.list
+    interval: 86400
+
+  Crypto:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Crypto.list
+    path: ./ruleset/acl4ssr/Crypto.list
+    interval: 86400
+  Scholar:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Ruleset/Scholar.list
+    path: ./ruleset/acl4ssr/Scholar.list
+    interval: 86400
+
+  ProxyGFWlist:
+    type: http
+    behavior: classical
+    url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/ProxyGFWlist.list
+    path: ./ruleset/acl4ssr/ProxyGFWlist.list
+    interval: 86400
+
+# ========== rules ==========
+rules:
+  # ===== 自定义直连（沿用 wxy-sr-rules.conf）=====
+  - DOMAIN-SUFFIX,blueair.io,Direct
+  - DOMAIN-SUFFIX,jetbrains.com,Direct
+  - DOMAIN-SUFFIX,ugreengroup.com,Direct
+  - DOMAIN-SUFFIX,appstorrent.ru,Direct
+  - DOMAIN-SUFFIX,zerotier.com,Direct
+  - DOMAIN-SUFFIX,imgse.com,Direct
+  - DOMAIN-SUFFIX,wxy8866.com,Direct
+
+  # ===== AI / Claude / Anthropic 自定义规则（来自 test.yaml）=====
+  - DOMAIN-SUFFIX,anthropic.com,AI
+  - DOMAIN-SUFFIX,claude.ai,AI
+  - DOMAIN-SUFFIX,claude.com,AI
+  - DOMAIN-SUFFIX,clau.de,AI
+  - DOMAIN-SUFFIX,claudemcpclient.com,AI
+  - DOMAIN-SUFFIX,claudemcpcontent.com,AI
+  - DOMAIN-SUFFIX,claudeusercontent.com,AI
+  - DOMAIN,servd-anthropic-website.b-cdn.net,AI
+  - DOMAIN,anthropic.com.cdn.cloudflare.net,AI
+  - DOMAIN,anthropic.auth0.com,AI
+  - DOMAIN,anthropic-com.ghost.io,AI
+  - DOMAIN-SUFFIX,sentry.io,AI
+  - DOMAIN-SUFFIX,statsigapi.net,AI
+  - DOMAIN,browser-intake-us5-datadoghq.com,AI
+  - DOMAIN-KEYWORD,datadog,AI
+  - DOMAIN-KEYWORD,sift,AI
+  - DOMAIN-SUFFIX,intercom.io,AI
+  - DOMAIN-SUFFIX,intercomcdn.com,AI
+  - DOMAIN,cdn.usefathom.com,AI
+  - IP-CIDR,160.79.104.0/21,AI,no-resolve
+  - IP-CIDR6,2607:6bc0::/32,AI,no-resolve
+  - IP-ASN,399358,AI,no-resolve
+  - DOMAIN-KEYWORD,anthropic,AI
+  - DOMAIN-KEYWORD,claude,AI
+  - DOMAIN-KEYWORD,openai,AI
+  - DOMAIN-SUFFIX,chatgpt.com,AI
+  - DOMAIN-SUFFIX,openai.com,AI
+  - DOMAIN-SUFFIX,openaiapi-site.azureedge.net,AI
+  - DOMAIN-SUFFIX,copilot.microsoft.com,AI
+
+  # ===== 本地进程（macOS）=====
+  - PROCESS-NAME,Feishu,Direct
+  - PROCESS-NAME,Lark,Direct
+  - PROCESS-NAME,Lark Helper,Direct
+  - PROCESS-NAME,WeChat,Direct
+  - PROCESS-NAME,Weixin,Direct
+  - PROCESS-NAME,Binance Helper,狮城节点
+  - PROCESS-NAME,Podcasts,自动选择
+
+  # ===== 基础规则集（拒绝 / 直连 / LAN）=====
+  - RULE-SET,reject,REJECT
+  - RULE-SET,private,Direct
+  - RULE-SET,lancidr,Direct,no-resolve
+  - RULE-SET,LocalAreaNetwork,Direct
+  - RULE-SET,UnBan,Direct
+  - RULE-SET,Download,Direct
+
+  # ===== 服务规则集 =====
+  - RULE-SET,GoogleFCM,谷歌FCM
+  - RULE-SET,GoogleCN,Direct
+  - RULE-SET,SteamCN,Direct
+  - RULE-SET,OneDrive,Direct
+  - RULE-SET,Microsoft,Microsoft
+  - RULE-SET,apple,Apple
+  - RULE-SET,icloud,Apple
+  - RULE-SET,Google,Google
+
+  - RULE-SET,OpenAi,AI
+  - RULE-SET,AI,AI
+  - RULE-SET,Scholar,Scholar
+
+  - RULE-SET,Telegram,Telegram
+  - RULE-SET,telegramcidr,Telegram,no-resolve
+
+  # ===== 流媒体 =====
+  - RULE-SET,NetEaseMusic,网易音乐
+  - RULE-SET,YouTube,YouTube
+  - RULE-SET,Netflix,Netflix
+  - RULE-SET,Disney,Disney+
+  - RULE-SET,HBO,HBO
+  - RULE-SET,Bahamut,Bahamut
+  - RULE-SET,BilibiliHMT,Bilibili
+  - RULE-SET,Bilibili,Bilibili
+  - RULE-SET,TikTok,Tiktok
+  - RULE-SET,ChinaMedia,Direct
+  - RULE-SET,ProxyMedia,Proxies
+
+  # ===== 游戏平台 =====
+  - RULE-SET,Epic,Epic
+  - RULE-SET,Steam,Steam
+  - RULE-SET,Origin,游戏平台
+  - RULE-SET,Sony,PlayStation
+  - RULE-SET,Nintendo,游戏平台
+
+  # ===== Crypto =====
+  - RULE-SET,Crypto,Crypto
+
+  # ===== 通用代理 / 直连 =====
+  - RULE-SET,ProxyGFWlist,Proxies
+  - RULE-SET,proxy,Proxies
+  - RULE-SET,direct,Direct
+  - RULE-SET,ChinaDomain,Direct
+  - RULE-SET,ChinaCompanyIp,Direct,no-resolve
+  - RULE-SET,cncidr,Direct,no-resolve
+
+  # ===== GeoIP 兜底 =====
+  - GEOIP,LAN,Direct,no-resolve
+  - GEOIP,CN,Direct,no-resolve
+
+  # ===== Final =====
+  - MATCH,Final
